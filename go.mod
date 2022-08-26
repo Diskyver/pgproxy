@@ -1,4 +1,4 @@
-module example.com/mod
+module github.com/diskyver/pgproxy
 
 go 1.18
 

@@ -14,6 +14,8 @@ import (
 type PgProxySession interface {
 	OnConnect(socket *pgx.Conn)
 	OnQuery(query *pgproto3.Query) (*pgproto3.Query, error)
+	OnResult(rows pgx.Rows, err error)
+	OnClose(socket *pgx.Conn)
 }
 
 type PgProxyServerBackend struct {
@@ -43,7 +45,10 @@ func (p *PgProxyServerBackend) runQueryOnDB(query *pgproto3.Query) (pgx.Rows, er
 }
 
 func (p *PgProxyServerBackend) Run(session PgProxySession) error {
-	defer p.Close()
+	defer func() {
+		session.OnClose(p.db)
+		p.Close()
+	}()
 
 	err := p.handleStartup()
 	if err != nil {
@@ -71,6 +76,8 @@ func (p *PgProxyServerBackend) Run(session PgProxySession) error {
 			}
 
 			rows, err := p.runQueryOnDB(query)
+			session.OnResult(rows, err)
+
 			if err != nil {
 				buf := (&pgproto3.ErrorResponse{
 					Message: string(err.Error()),

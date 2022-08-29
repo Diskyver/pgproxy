@@ -18,11 +18,11 @@ jobs:
       with:
         go-version: 1.18
 
+    - name: Go get
+      run: go get ./...
+
     - name: Build
-      run: go build -v ./...
+      run: go build
 
     - name: Test
-      run: go test -v ./...
-      
-    - name: GoDoc Action
-      uses: ktr0731/godoc-action@v0.1.0
+      run: go test -v

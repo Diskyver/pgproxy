@@ -16,9 +16,16 @@ import (
 // Define the behavior you want during the session
 // by implementing the PgProxySession interface
 type PgProxySession interface {
+	// OnConnect handle the postgresql client socket on established connection
 	OnConnect(socket *pgx.Conn)
+	// OnQuery handle the query before the postgresql server
+	// you can edit the query here or simply return an error if
+	// you don't want to send the query to the postgresql server.
 	OnQuery(query *pgproto3.Query) (*pgproto3.Query, error)
+	// OnResult handle the query's result, err is define if something
+	// wrong occured from the postgresql server.
 	OnResult(rows pgx.Rows, err error)
+	// OnClose handle the postgresql client socket before to close the connection
 	OnClose(socket *pgx.Conn)
 }
 

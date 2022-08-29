@@ -151,17 +151,23 @@ func (p *pgProxyServerBackend) handleStartup() error {
 	return nil
 }
 
+func (p *pgProxyServerBackend) errorResponse(msg string) error {
+	buf := (&pgproto3.ErrorResponse{Message: msg}).Encode(nil)
+	_, err := p.conn.Write(buf)
+	return err
+}
+
 func (p *pgProxyServerBackend) close() error {
 	if p != nil && p.db != nil && !p.db.IsClosed() {
 		if err := p.db.Close(context.Background()); err != nil {
-			fmt.Fprintf(os.Stderr, "Unable to close gracefully the database connection: %e", err)
+			fmt.Fprintf(os.Stderr, "Unable to close gracefully the database connection: %s", err)
 			return err
 		}
 	}
 
 	if p != nil && p.conn != nil {
 		if err := p.conn.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "Unable to close gracefully the tcp server %e", err)
+			fmt.Fprintf(os.Stderr, "Unable to close gracefully the tcp server %s", err)
 			return err
 		}
 	}
@@ -194,25 +200,29 @@ func (p *PgProxyServer) Listen(addr string) error {
 		fmt.Println("Accepted connection from", conn.RemoteAddr())
 
 		db, err := pgx.Connect(context.Background(), p.pgUri)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Unable to reach the database %s", err)
-		}
-
-		p.session.OnConnect(db)
-
 		p.backend = newPgProxyServerBackend(conn, db)
 
-		sig_chan := make(chan os.Signal)
-		signal.Notify(sig_chan, os.Interrupt, syscall.SIGTERM)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Unable to reach the database: %s", err)
+			p.backend.errorResponse(err.Error())
+			p.backend.close()
+		} else {
+			p.session.OnConnect(db)
 
-		go func() {
-			err := p.backend.run(p.session)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Something wrong occured with the backend %s", err)
-			}
-			log.Println("Closed connection from", conn.RemoteAddr())
-		}()
+			sig_chan := make(chan os.Signal)
+			signal.Notify(sig_chan, os.Interrupt, syscall.SIGTERM)
+
+			go func() {
+				err := p.backend.run(p.session)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Something wrong occured with the backend %s", err)
+				}
+				log.Println("Closed connection from", conn.RemoteAddr())
+			}()
+		}
+
 	}
+	return nil
 }
 
 // CreatePgProxy create a new proxy for a postgresql server

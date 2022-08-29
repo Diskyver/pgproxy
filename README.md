@@ -1,5 +1,7 @@
 # pgproxy
 
+[![Go](https://github.com/Diskyver/pgproxy/actions/workflows/go.yml/badge.svg)](https://github.com/Diskyver/pgproxy/actions/workflows/go.yml)
+
 A library for making postgresql server proxies, handle message flow and redirect them to a true postgresql server.
 
 [Example of implementation here](https://github.com/Diskyver/pgproxy-example)

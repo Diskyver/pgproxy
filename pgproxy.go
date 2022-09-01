@@ -29,20 +29,27 @@ type PgProxySession interface {
 	OnClose(socket *pgx.Conn)
 }
 
+type PgBackend interface {
+	Run(session PgProxySession) error
+	CloseBackend() error
+	ErrorResponse(err string) error
+}
+
 type pgProxyServerBackend struct {
 	backend *pgproto3.Backend
 	conn    net.Conn
 	db      *pgx.Conn
 }
 
-func newPgProxyServerBackend(conn net.Conn, db *pgx.Conn) *pgProxyServerBackend {
+func newPgProxyServerBackend(conn net.Conn, pgUri string) (*pgProxyServerBackend, error) {
+	db, err := pgx.Connect(context.Background(), pgUri)
 	backend := pgproto3.NewBackend(pgproto3.NewChunkReader(conn), conn)
 
 	return &pgProxyServerBackend{
 		backend: backend,
 		conn:    conn,
 		db:      db,
-	}
+	}, err
 }
 
 func (p *pgProxyServerBackend) runQueryOnDB(query *pgproto3.Query) (pgx.Rows, error) {
@@ -55,10 +62,14 @@ func (p *pgProxyServerBackend) runQueryOnDB(query *pgproto3.Query) (pgx.Rows, er
 	return row, nil
 }
 
-func (p *pgProxyServerBackend) run(session PgProxySession) error {
+func (p *pgProxyServerBackend) Run(session PgProxySession) error {
+	if p != nil && p.db != nil {
+		session.OnConnect(p.db)
+	}
+
 	defer func() {
 		session.OnClose(p.db)
-		p.close()
+		p.CloseBackend()
 	}()
 
 	err := p.handleStartup()
@@ -151,13 +162,13 @@ func (p *pgProxyServerBackend) handleStartup() error {
 	return nil
 }
 
-func (p *pgProxyServerBackend) errorResponse(msg string) error {
+func (p *pgProxyServerBackend) ErrorResponse(msg string) error {
 	buf := (&pgproto3.ErrorResponse{Message: msg}).Encode(nil)
 	_, err := p.conn.Write(buf)
 	return err
 }
 
-func (p *pgProxyServerBackend) close() error {
+func (p *pgProxyServerBackend) CloseBackend() error {
 	if p != nil && p.db != nil && !p.db.IsClosed() {
 		if err := p.db.Close(context.Background()); err != nil {
 			fmt.Fprintf(os.Stderr, "Unable to close gracefully the database connection: %s", err)
@@ -179,7 +190,7 @@ func (p *pgProxyServerBackend) close() error {
 type PgProxyServer struct {
 	pgUri   string
 	session PgProxySession
-	backend *pgProxyServerBackend
+	backend PgBackend
 }
 
 // Listen TCP packets that use Message Flow postgresql protocol
@@ -199,21 +210,19 @@ func (p *PgProxyServer) Listen(addr string) error {
 		}
 		fmt.Println("Accepted connection from", conn.RemoteAddr())
 
-		db, err := pgx.Connect(context.Background(), p.pgUri)
-		p.backend = newPgProxyServerBackend(conn, db)
+		backend, err := newPgProxyServerBackend(conn, p.pgUri)
+		p.backend = backend
 
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Unable to reach the database: %s", err)
-			p.backend.errorResponse(err.Error())
-			p.backend.close()
+			p.backend.ErrorResponse(err.Error())
+			p.backend.CloseBackend()
 		} else {
-			p.session.OnConnect(db)
-
 			sig_chan := make(chan os.Signal)
 			signal.Notify(sig_chan, os.Interrupt, syscall.SIGTERM)
 
 			go func() {
-				err := p.backend.run(p.session)
+				err := p.backend.Run(p.session)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "Something wrong occured with the backend %s", err)
 				}
@@ -233,5 +242,9 @@ func CreatePgProxy(pgUri string, session PgProxySession) *PgProxyServer {
 
 // Close the PgProxyServer, close the database connection and the tcp server
 func (p *PgProxyServer) Close() error {
-	return p.backend.close()
+	return p.backend.CloseBackend()
+}
+
+func CreatePgStandAloneProxy(pgUri string, session PgProxySession) *PgProxyServer {
+	return &PgProxyServer{pgUri: pgUri, session: session, backend: nil}
 }

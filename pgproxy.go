@@ -158,12 +158,12 @@ func (p *pgProxyServerBackend) errorResponse(msg string) error {
 }
 
 func (p *pgProxyServerBackend) close() error {
-	if p != nil && p.db != nil && !p.db.IsClosed() {
-		if err := p.db.Close(context.Background()); err != nil {
-			fmt.Fprintf(os.Stderr, "Unable to close gracefully the database connection: %s", err)
-			return err
-		}
-	}
+	//if p != nil && p.db != nil && !p.db.IsClosed() {
+	//	if err := p.db.Close(context.Background()); err != nil {
+	//		fmt.Fprintf(os.Stderr, "Unable to close gracefully the database connection: %s", err)
+	//		return err
+	//	}
+	//}
 
 	if p != nil && p.conn != nil {
 		if err := p.conn.Close(); err != nil {

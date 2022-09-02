@@ -51,13 +51,16 @@ func sendToPg(msg pgproto3.FrontendMessage) ([]byte, error) {
 	defer conn.Close()
 
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error sendToPg(): %e", err)
 		return nil, err
 	}
+	fmt.Printf("Attenpt to write message flow %w", msg)
 	conn.Write(msg.Encode(nil))
 
 	resp := make([]byte, 4096)
 	_, err = conn.Read(resp)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error con read %e", err)
 		return nil, err
 	}
 

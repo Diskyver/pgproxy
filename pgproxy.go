@@ -46,6 +46,24 @@ func newPgProxyServerBackend(conn net.Conn, pool *pgxpool.Pool) *pgProxyServerBa
 	}
 }
 
+func sendToPg(msg pgproto3.FrontendMessage) ([]byte, error) {
+	conn, err := net.Dial("tcp", "postgres")
+	defer conn.Close()
+
+	if err != nil {
+		return nil, err
+	}
+	conn.Write(msg.Encode(nil))
+
+	resp := make([]byte, 4096)
+	_, err = conn.Read(resp)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp, nil
+}
+
 func (p *pgProxyServerBackend) runQueryOnDB(query *pgproto3.Query) (pgx.Rows, error) {
 	row, err := p.pool.Query(context.Background(), query.String)
 	if err != nil {
@@ -84,38 +102,40 @@ func (p *pgProxyServerBackend) run(session PgProxySession) error {
 				return err
 			}
 
-			rows, err := p.runQueryOnDB(query)
-			session.OnResult(rows, err)
-
-			if err != nil {
-				buf := (&pgproto3.ErrorResponse{
-					Message: string(err.Error()),
-				}).Encode(nil)
-				buf = (&pgproto3.ReadyForQuery{TxStatus: 'I'}).Encode(buf)
-				_, err = p.conn.Write(buf)
-				break
-			}
-
-			fields := rows.FieldDescriptions()
-			fmt.Println(fields)
-			buf := (&pgproto3.RowDescription{
-				Fields: fields,
-			}).Encode(nil)
-
-			buf = (&pgproto3.DataRow{Values: rows.RawValues()}).Encode(buf)
-			buf = (&pgproto3.CommandComplete{CommandTag: []byte(query.String)}).Encode(buf)
-			buf = (&pgproto3.ReadyForQuery{TxStatus: 'I'}).Encode(buf)
-			_, err = p.conn.Write(buf)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "error writing query response: %s", err)
-				return err
-			}
+			//rows, err := p.runQueryOnDB(query)
+			//session.OnResult(rows, err)
+		//
+		//if err != nil {
+		//	buf := (&pgproto3.ErrorResponse{
+		//		Message: string(err.Error()),
+		//	}).Encode(nil)
+		//	buf = (&pgproto3.ReadyForQuery{TxStatus: 'I'}).Encode(buf)
+		//	_, err = p.conn.Write(buf)
+		//	break
+		//}
+		//
+		//fields := rows.FieldDescriptions()
+		//fmt.Println(fields)
+		//buf := (&pgproto3.RowDescription{
+		//	Fields: fields,
+		//}).Encode(nil)
+		//
+		//buf = (&pgproto3.DataRow{Values: rows.RawValues()}).Encode(buf)
+		//buf = (&pgproto3.CommandComplete{CommandTag: []byte(query.String)}).Encode(buf)
+		//buf = (&pgproto3.ReadyForQuery{TxStatus: 'I'}).Encode(buf)
+		//_, err = p.conn.Write(buf)
+		//if err != nil {
+		//	fmt.Fprintf(os.Stderr, "error writing query response: %s", err)
+		//	return err
+		//}
 		case *pgproto3.Terminate:
-			return nil
+			//return nil
 		default:
-			fmt.Fprintf(os.Stderr, "received message other than Query from client: %#v", msg)
-			return nil
+			//fmt.Fprintf(os.Stderr, "received message other than Query from client: %#v", msg)
+			//return nil
 		}
+		resp, err := sendToPg(msg)
+		p.conn.Write(resp)
 	}
 }
 

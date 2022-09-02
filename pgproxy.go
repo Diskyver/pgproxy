@@ -57,9 +57,7 @@ func (p *pgProxyServerBackend) runQueryOnDB(query *pgproto3.Query) (pgx.Rows, er
 }
 
 func (p *pgProxyServerBackend) run(session PgProxySession) error {
-	defer func() {
-		p.close()
-	}()
+	defer p.close()
 
 	err := p.handleStartup()
 	if err != nil {
@@ -229,13 +227,19 @@ func (p *PgProxyServer) Listen(addr string) error {
 			sig_chan := make(chan os.Signal)
 			signal.Notify(sig_chan, os.Interrupt, syscall.SIGTERM)
 
-			go func() {
+			backend_channel := make(chan error)
+
+			go func(c chan error) {
 				err := p.backend.run(p.session)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "Something wrong occured with the backend %s", err)
-				}
-				log.Println("Closed connection from", conn.RemoteAddr())
-			}()
+				c <- err
+			}(backend_channel)
+
+			err := <-backend_channel
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Something wrong occured with the backend %s", err)
+			}
+
+			log.Println("Closed connection from", conn.RemoteAddr())
 		}
 
 	}

@@ -11,13 +11,14 @@ import (
 
 	"github.com/jackc/pgproto3/v2"
 	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v4/pgxpool"
 )
 
 // Define the behavior you want during the session
 // by implementing the PgProxySession interface
 type PgProxySession interface {
 	// OnConnect handle the postgresql client socket on established connection
-	OnConnect(socket *pgx.Conn)
+	OnConnect(ctx context.Context, socket *pgx.Conn) error
 	// OnQuery handle the query before the postgresql server
 	// you can edit the query here or simply return an error if
 	// you don't want to send the query to the postgresql server.
@@ -26,27 +27,27 @@ type PgProxySession interface {
 	// wrong occured from the postgresql server.
 	OnResult(rows pgx.Rows, err error)
 	// OnClose handle the postgresql client socket before to close the connection
-	OnClose(socket *pgx.Conn)
+	OnClose(socket *pgx.Conn) bool
 }
 
 type pgProxyServerBackend struct {
 	backend *pgproto3.Backend
 	conn    net.Conn
-	db      *pgx.Conn
+	pool    *pgxpool.Pool
 }
 
-func newPgProxyServerBackend(conn net.Conn, db *pgx.Conn) *pgProxyServerBackend {
+func newPgProxyServerBackend(conn net.Conn, pool *pgxpool.Pool) *pgProxyServerBackend {
 	backend := pgproto3.NewBackend(pgproto3.NewChunkReader(conn), conn)
 
 	return &pgProxyServerBackend{
 		backend: backend,
 		conn:    conn,
-		db:      db,
+		pool:    pool,
 	}
 }
 
 func (p *pgProxyServerBackend) runQueryOnDB(query *pgproto3.Query) (pgx.Rows, error) {
-	row, err := p.db.Query(context.Background(), query.String)
+	row, err := p.pool.Query(context.Background(), query.String)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Query row failed: %v\n", err)
 		return nil, err
@@ -57,7 +58,6 @@ func (p *pgProxyServerBackend) runQueryOnDB(query *pgproto3.Query) (pgx.Rows, er
 
 func (p *pgProxyServerBackend) run(session PgProxySession) error {
 	defer func() {
-		session.OnClose(p.db)
 		p.close()
 	}()
 
@@ -199,16 +199,33 @@ func (p *PgProxyServer) Listen(addr string) error {
 		}
 		fmt.Println("Accepted connection from", conn.RemoteAddr())
 
-		db, err := pgx.Connect(context.Background(), p.pgUri)
-		p.backend = newPgProxyServerBackend(conn, db)
+		config, err := pgxpool.ParseConfig(p.pgUri)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+			return p.session.OnConnect(ctx, conn)
+		}
+
+		config.AfterRelease = func(conn *pgx.Conn) bool {
+			return p.session.OnClose(conn)
+		}
+
+		pool, err := pgxpool.ConnectConfig(context.Background(), config)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		defer pool.Close()
+
+		p.backend = newPgProxyServerBackend(conn, pool)
 
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Unable to reach the database: %s", err)
 			p.backend.errorResponse(err.Error())
 			p.backend.close()
 		} else {
-			p.session.OnConnect(db)
-
 			sig_chan := make(chan os.Signal)
 			signal.Notify(sig_chan, os.Interrupt, syscall.SIGTERM)
 

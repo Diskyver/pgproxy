@@ -1,55 +1,3 @@
-# pgproxy
-
-[![Go](https://github.com/Diskyver/pgproxy/actions/workflows/go.yml/badge.svg)](https://github.com/Diskyver/pgproxy/actions/workflows/go.yml)
-
-A library for making postgresql server proxies, handle message flow and redirect them to a true postgresql server.
-
-[Example of implementation here](https://github.com/Diskyver/pgproxy-example)
-
-## Installation
-
-```
-go get -v https://github.com/Diskyver/pgproxy
-```
-
-## Usage
-
-Call the `CreatePgProxy` function in order to create a new proxy. You need to implement the PgProxySession interface yourself to define the wanted behavior during the session.
-
-```go
-type Session struct{}
-
-func (s *Session) OnConnect(_ *pgx.Conn) {
-	fmt.Println("I'm in!")
-}
-
-func (s *Session) OnQuery(query *pgproto3.Query) (*pgproto3.Query, error) {
-	fmt.Println("query:", query.String)
-	return query, nil
-}
-
-func (s *Session) OnResult(rows pgx.Rows, err error) {
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	fmt.Println("%w", rows)
-}
-
-func (s *Session) OnClose(_ *pgx.Conn) {
-	fmt.Println("I'm out")
-}
-
-func main() {
-	proxy := pgproxy.CreatePgProxy("postgres://user:password@localhost:5432", &Session{})
-	proxy.Listen("localhost:8080")
-}
-```
-
-See the godoc for more details
-
-```
-$ go doc -all
 package pgproxy // import "github.com/diskyver/pgproxy"
 
 
@@ -127,4 +75,4 @@ type ServerSig interface {
 type StopGracefully struct{}
 
 func (s StopGracefully) Signal() int
-```
+

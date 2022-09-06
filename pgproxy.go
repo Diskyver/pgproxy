@@ -14,6 +14,16 @@ import (
 	"github.com/jackc/pgx/v4/pgxpool"
 )
 
+type ServerSig interface {
+	Signal() int
+}
+
+type StopGracefully struct{}
+
+func (s StopGracefully) Signal() int {
+	return 0
+}
+
 // Define the behavior you want during the session
 // by implementing the PgProxySession interface
 type PgProxySession interface {
@@ -161,6 +171,9 @@ type PgProxyServer struct {
 	pgUri   string
 	session PgProxySession
 	backend *pgProxyServerBackend
+	sig     chan ServerSig
+	running bool
+	stopped bool
 }
 
 // Listen TCP packets that use Message Flow postgresql protocol
@@ -171,14 +184,34 @@ func (p *PgProxyServer) Listen(addr string) error {
 		fmt.Fprint(os.Stderr, err)
 		return err
 	}
+	defer listener.Close()
 
 	log.Println("Listening on", listener.Addr())
+	p.running = true
+
+	go func(s *PgProxyServer) {
+		sig_handled := <-s.sig
+		switch sig_handled.(type) {
+		case StopGracefully:
+			s.running = false
+			s.stopped = true
+			fmt.Println("the server receive a StopGracefully signal")
+		default:
+			fmt.Println("unknowned server signal")
+		}
+	}(p)
 
 	for {
+		if p.stopped {
+			fmt.Println("Server has been stopped gracefully")
+			return nil
+		}
+
 		conn, err := listener.Accept()
 		if err != nil {
 			fmt.Fprint(os.Stderr, err)
 		}
+
 		fmt.Println("Accepted connection from", conn.RemoteAddr())
 
 		config, err := pgxpool.ParseConfig(p.pgUri)
@@ -228,6 +261,7 @@ func (p *PgProxyServer) Listen(addr string) error {
 			}
 
 			log.Println("Closed connection from", conn.RemoteAddr())
+
 		}
 
 	}
@@ -237,7 +271,12 @@ func (p *PgProxyServer) Listen(addr string) error {
 // Allows to redirect queries to a true postgresql server
 // pgUri describe the postgresql URI for the postgresql server. See https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING
 func CreatePgProxy(pgUri string, session PgProxySession) *PgProxyServer {
-	return &PgProxyServer{pgUri: pgUri, session: session, backend: nil}
+	return &PgProxyServer{pgUri: pgUri, session: session, backend: nil, running: false, stopped: false}
+}
+
+// Close the PgServer gracefully
+func (p *PgProxyServer) Close() {
+	p.sig <- StopGracefully{}
 }
 
 // PgServerSession define the behavior you want during the session
@@ -353,6 +392,9 @@ func (p *pgServerBackend) errorResponse(msg string) error {
 type PgServer struct {
 	session PgServerSession
 	backend *pgServerBackend
+	sig     chan ServerSig
+	running bool
+	stopped bool
 }
 
 // Listen TCP packets that use Message Flow postgresql protocol
@@ -363,20 +405,38 @@ func (p *PgServer) Listen(addr string) error {
 		return err
 	}
 
+	defer listener.Close()
+
+	p.running = true
 	log.Println("Listening on", listener.Addr())
 
+	go func(s *PgServer) {
+		sig_handled := <-s.sig
+		switch sig_handled.(type) {
+		case StopGracefully:
+			s.running = false
+			s.stopped = true
+			fmt.Println("the server receive a StopGracefully signal")
+		default:
+			fmt.Println("unknowned server signal")
+		}
+	}(p)
+
 	for {
+		if p.stopped {
+			fmt.Println("Server has been stopped gracefully")
+			return nil
+		}
+
 		conn, err := listener.Accept()
 		if err != nil {
 			fmt.Fprint(os.Stderr, err)
 		}
+
+		defer conn.Close()
 		fmt.Println("Accepted connection from", conn.RemoteAddr())
 
 		p.backend = newPgServerBackend(conn)
-
-		sig_chan := make(chan os.Signal)
-		signal.Notify(sig_chan, os.Interrupt, syscall.SIGTERM)
-
 		backend_channel := make(chan error)
 
 		go func(c chan error) {
@@ -390,12 +450,16 @@ func (p *PgServer) Listen(addr string) error {
 		}
 
 		log.Println("Closed connection from", conn.RemoteAddr())
-
 	}
 }
 
 // CreatePgServer create a new proxy for a postgresql server without a pgxpool.Pool
 // pgUri describe the postgresql URI for the postgresql server. See https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING
 func CreatePgServer(session PgServerSession) *PgServer {
-	return &PgServer{session: session, backend: nil}
+	return &PgServer{session: session, backend: nil, sig: make(chan ServerSig), running: false, stopped: false}
+}
+
+// Close the PgServer gracefully
+func (p *PgServer) Close() {
+	p.sig <- StopGracefully{}
 }

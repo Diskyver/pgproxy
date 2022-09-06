@@ -240,7 +240,7 @@ func CreatePgProxy(pgUri string, session PgProxySession) *PgProxyServer {
 	return &PgProxyServer{pgUri: pgUri, session: session, backend: nil}
 }
 
-// Define the behavior you want during the session
+// PgServerSession define the behavior you want during the session
 // by implementing the PgServerSession interface
 type PgServerSession interface {
 	// OnQuery handle the query before the postgresql server

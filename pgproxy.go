@@ -254,10 +254,10 @@ type pgServerBackend struct {
 	conn    net.Conn
 }
 
-func newPgServerBackend(conn net.Conn) *pgProxyServerBackend {
+func newPgServerBackend(conn net.Conn) *pgServerBackend {
 	backend := pgproto3.NewBackend(pgproto3.NewChunkReader(conn), conn)
 
-	return &pgProxyServerBackend{
+	return &pgServerBackend{
 		backend: backend,
 		conn:    conn,
 	}
@@ -351,9 +351,8 @@ func (p *pgServerBackend) errorResponse(msg string) error {
 
 // A PgServer is a postgresql server proxy
 type PgServer struct {
-	pgUri   string
-	session PgProxySession
-	backend *pgProxyServerBackend
+	session PgServerSession
+	backend *pgServerBackend
 }
 
 // Listen TCP packets that use Message Flow postgresql protocol
@@ -397,6 +396,6 @@ func (p *PgServer) Listen(addr string) error {
 
 // CreatePgServer create a new proxy for a postgresql server without a pgxpool.Pool
 // pgUri describe the postgresql URI for the postgresql server. See https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING
-func CreatePgServer(pgUri string, session PgProxySession) *PgProxyServer {
-	return &PgProxyServer{pgUri: pgUri, session: session, backend: nil}
+func CreatePgServer(session PgServerSession) *PgServer {
+	return &PgServer{session: session, backend: nil}
 }

@@ -53,37 +53,64 @@ $ go doc -all
 package pgproxy // import "github.com/diskyver/pgproxy"
 
 
+FUNCTIONS
+
+func ReadyForQueryMesage() []byte
+
 TYPES
 
 type PgProxyServer struct {
-        // Has unexported fields.
+	// Has unexported fields.
 }
-    A PgProxyServer is a postgresql server proxy
+    A PgProxyServer is a postgresql server proxy it has a pool of connection to
+    a true postgresql server
 
 func CreatePgProxy(pgUri string, session PgProxySession) *PgProxyServer
-    CreatePgProxy create a new proxy for a postgresql server pgUri describe the
-    postgresql URI for the postgresql server. See
+    CreatePgProxy create a new proxy for a postgresql server Allows to redirect
+    queries to a true postgresql server pgUri describe the postgresql URI for
+    the postgresql server. See
     https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING
 
-func (p *PgProxyServer) Close() error
-    Close the PgProxyServer, close the database connection and the tcp server
+func CreatePgServer(pgUri string, session PgProxySession) *PgProxyServer
+    CreatePgServer create a new proxy for a postgresql server without a
+    pgxpool.Pool pgUri describe the postgresql URI for the postgresql server.
+    See
+    https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-CONNSTRING
 
 func (p *PgProxyServer) Listen(addr string) error
-    Listen TCP packets that use Message Flow postgresql protocol
+    Listen TCP packets that use Message Flow postgresql protocol create also a
+    connection pool to a postgresql server
 
 type PgProxySession interface {
-        // OnConnect handle the postgresql client socket on established connection
-        OnConnect(socket *pgx.Conn)
-        // OnQuery handle the query before the postgresql server
-        // you can edit the query here or simply return an error if
-        // you don't want to send the query to the postgresql server.
-        OnQuery(query *pgproto3.Query) (*pgproto3.Query, error)
-        // OnResult handle the query's result, err is define if something
-        // wrong occured from the postgresql server.
-        OnResult(rows pgx.Rows, err error)
-        // OnClose handle the postgresql client socket before to close the connection
-        OnClose(socket *pgx.Conn)
+	// OnConnect handle the postgresql client socket on established connection
+	OnConnect(ctx context.Context, socket *pgx.Conn) error
+	// OnQuery handle the query before the postgresql server
+	// you can edit the query here or simply return an error if
+	// you don't want to send the query to the postgresql server.
+	OnQuery(query *pgproto3.Query) (*pgproto3.Query, error)
+	// OnResult handle the query's result, err is define if something
+	// wrong occured from the postgresql server.
+	OnResult(rows pgx.Rows, err error)
+	// OnClose handle the postgresql client socket before to close the connection
+	OnClose(socket *pgx.Conn) bool
 }
     Define the behavior you want during the session by implementing the
     PgProxySession interface
+
+type PgServer struct {
+	// Has unexported fields.
+}
+    A PgServer is a postgresql server proxy
+
+func (p *PgServer) Listen(addr string) error
+    Listen TCP packets that use Message Flow postgresql protocol
+
+type PgServerSession interface {
+	// OnQuery handle the query before the postgresql server
+	// you can edit the query here or simply return an error if
+	// you don't want to send the query to the postgresql server.
+	OnQuery(query *pgproto3.Query) ([]byte, error)
+}
+    Define the behavior you want during the session by implementing the
+    PgServerSession interface
 ```
